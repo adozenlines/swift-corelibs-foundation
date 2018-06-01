@@ -10,7 +10,7 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 let kCFCharacterSetControl = CFCharacterSetPredefinedSet.control
 let kCFCharacterSetWhitespace = CFCharacterSetPredefinedSet.whitespace
 let kCFCharacterSetWhitespaceAndNewline = CFCharacterSetPredefinedSet.whitespaceAndNewline
@@ -50,13 +50,18 @@ open class NSCharacterSet : NSObject, NSCopying, NSMutableCopying, NSCoding {
     }
     
     open override func isEqual(_ value: Any?) -> Bool {
+        guard let runtimeClass = _CFRuntimeGetClassWithTypeID(CFCharacterSetGetTypeID()) else {
+            fatalError("Could not obtain CFRuntimeClass of CFCharacterSet")
+        }
+
+        guard let equalFunction = runtimeClass.pointee.equal else {
+            fatalError("Could not obtain equal function from CFRuntimeClass of CFCharacterSet")
+        }
+
         switch value {
-        case let other as CharacterSet:
-            return CFEqual(_cfObject, other._cfObject)
-        case let other as NSCharacterSet:
-            return CFEqual(_cfObject, other._cfObject)
-        default:
-            return false
+        case let other as CharacterSet: return equalFunction(self._cfObject, other._cfObject) == true
+        case let other as NSCharacterSet: return equalFunction(self._cfObject, other._cfObject) == true
+        default: return false
         }
     }
     

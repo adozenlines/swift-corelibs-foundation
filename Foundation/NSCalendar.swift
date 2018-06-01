@@ -9,7 +9,7 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 internal let kCFCalendarUnitEra = CFCalendarUnit.era.rawValue
 internal let kCFCalendarUnitYear = CFCalendarUnit.year.rawValue
 internal let kCFCalendarUnitMonth = CFCalendarUnit.month.rawValue
@@ -89,7 +89,7 @@ extension NSCalendar {
         public static let timeZone = Unit(rawValue: UInt(1 << 21))
 
         internal var _cfValue: CFCalendarUnit {
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
             return CFCalendarUnit(rawValue: self.rawValue)
 #else
             return CFCalendarUnit(self.rawValue)
@@ -298,7 +298,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     private func _symbol(_ key: CFString) -> String {
         let dateFormatter = CFDateFormatterCreate(kCFAllocatorSystemDefault, locale?._bridgeToObjectiveC()._cfObject, kCFDateFormatterNoStyle, kCFDateFormatterNoStyle)
         CFDateFormatterSetProperty(dateFormatter, kCFDateFormatterCalendarKey, self._cfObject)
-        return (CFDateFormatterCopyProperty(dateFormatter, key) as! CFString)._swiftObject
+        return (CFDateFormatterCopyProperty(dateFormatter, key) as! NSString)._swiftObject
     }
     
     open var eraSymbols: [String] {
@@ -386,25 +386,25 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     open func minimumRange(of unit: Unit) -> NSRange {
         let r = CFCalendarGetMinimumRangeOfUnit(self._cfObject, unit._cfValue)
         if (r.location == kCFNotFound) {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func maximumRange(of unit: Unit) -> NSRange {
         let r = CFCalendarGetMaximumRangeOfUnit(_cfObject, unit._cfValue)
         if r.location == kCFNotFound {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func range(of smaller: Unit, in larger: Unit, for date: Date) -> NSRange {
         let r = CFCalendarGetRangeOfUnit(_cfObject, smaller._cfValue, larger._cfValue, date.timeIntervalSinceReferenceDate)
         if r.location == kCFNotFound {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func ordinality(of smaller: Unit, in larger: Unit, for date: Date) -> Int {
@@ -449,7 +449,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     private func _convert(_ comps: DateComponents) -> (Array<Int32>, Array<Int8>) {
         var vector = [Int32]()
         var compDesc = [Int8]()
-        _convert(comps.era, type: "E", vector: &vector, compDesc: &compDesc)
+        _convert(comps.era, type: "G", vector: &vector, compDesc: &compDesc)
         _convert(comps.year, type: "y", vector: &vector, compDesc: &compDesc)
         _convert(comps.quarter, type: "Q", vector: &vector, compDesc: &compDesc)
         if comps.weekOfYear != NSDateComponentUndefined {
@@ -520,7 +520,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     
     private func _setComp(_ unitFlags: Unit, field: Unit, vector: [Int32], compIndex: inout Int, setter: (Int32) -> Void) {
         if unitFlags.contains(field) {
-            setter(vector[compIndex])
+            if vector[compIndex] != -1 {
+                setter(vector[compIndex])
+            }
             compIndex += 1
         }
     }
@@ -583,8 +585,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
         var at: CFAbsoluteTime = date.timeIntervalSinceReferenceDate
         
         let res: Bool = withUnsafeMutablePointer(to: &at) { t in
+            let count = Int32(vector.count)
             return vector.withUnsafeMutableBufferPointer { (vectorBuffer: inout UnsafeMutableBufferPointer<Int32>) in
-                return _CFCalendarAddComponentsV(_cfObject, t, CFOptionFlags(opts.rawValue), compDesc, vectorBuffer.baseAddress!, Int32(vector.count))
+                return _CFCalendarAddComponentsV(_cfObject, t, CFOptionFlags(opts.rawValue), compDesc, vectorBuffer.baseAddress!, count)
             }
         }
         
@@ -603,8 +606,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
                 return intArrayBuffer.baseAddress!.advanced(by: idx)
             }
 
+            let count = Int32(vector.count)
             return vector.withUnsafeMutableBufferPointer { (vecBuffer: inout UnsafeMutableBufferPointer<UnsafeMutablePointer<Int32>>) in
-                return _CFCalendarGetComponentDifferenceV(_cfObject, startingDate.timeIntervalSinceReferenceDate, resultDate.timeIntervalSinceReferenceDate, CFOptionFlags(opts.rawValue), compDesc, vecBuffer.baseAddress!, Int32(vector.count))
+                return _CFCalendarGetComponentDifferenceV(_cfObject, startingDate.timeIntervalSinceReferenceDate, resultDate.timeIntervalSinceReferenceDate, CFOptionFlags(opts.rawValue), compDesc, vecBuffer.baseAddress!, count)
             }
         }
         if res {
@@ -817,13 +821,13 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     */
     open func compare(_ date1: Date, to date2: Date, toUnitGranularity unit: Unit) -> ComparisonResult {
         switch (unit) {
-            case Unit.calendar:
+            case .calendar:
                 return .orderedSame
-            case Unit.timeZone:
+            case .timeZone:
                 return .orderedSame
-            case Unit.day:
+            case .day:
                 fallthrough
-            case Unit.hour:
+            case .hour:
                 let range = self.range(of: unit, for: date1)
                 let ats = range!.start.timeIntervalSinceReferenceDate
                 let at2 = date2.timeIntervalSinceReferenceDate
@@ -834,7 +838,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
                     return .orderedDescending
                 }
                 return .orderedAscending
-            case Unit.minute:
+            case .minute:
                 var int1 = 0.0
                 var int2 = 0.0
                 modf(date1.timeIntervalSinceReferenceDate, &int1)
@@ -848,7 +852,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
                     return .orderedDescending
                 }
                 return .orderedAscending
-            case Unit.second:
+            case .second:
                 var int1 = 0.0
                 var int2 = 0.0
                 modf(date1.timeIntervalSinceReferenceDate, &int1)
@@ -860,7 +864,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
                     return .orderedDescending
                 }
                 return .orderedAscending
-            case Unit.nanosecond:
+            case .nanosecond:
                 var int1 = 0.0
                 var int2 = 0.0
                 let frac1 = modf(date1.timeIntervalSinceReferenceDate, &int1)
@@ -1582,37 +1586,37 @@ open class NSDateComponents : NSObject, NSCopying, NSSecureCoding {
     */
     open func setValue(_ value: Int, forComponent unit: NSCalendar.Unit) {
         switch unit {
-            case NSCalendar.Unit.era:
+            case .era:
                 era = value
-            case NSCalendar.Unit.year:
+            case .year:
                 year = value
-            case NSCalendar.Unit.month:
+            case .month:
                 month = value
-            case NSCalendar.Unit.day:
+            case .day:
                 day = value
-            case NSCalendar.Unit.hour:
+            case .hour:
                 hour = value
-            case NSCalendar.Unit.minute:
+            case .minute:
                 minute = value
-            case NSCalendar.Unit.second:
+            case .second:
                 second = value
-            case NSCalendar.Unit.nanosecond:
+            case .nanosecond:
                 nanosecond = value
-            case NSCalendar.Unit.weekday:
+            case .weekday:
                 weekday = value
-            case NSCalendar.Unit.weekdayOrdinal:
+            case .weekdayOrdinal:
                 weekdayOrdinal = value
-            case NSCalendar.Unit.quarter:
+            case .quarter:
                 quarter = value
-            case NSCalendar.Unit.weekOfMonth:
+            case .weekOfMonth:
                 weekOfMonth = value
-            case NSCalendar.Unit.weekOfYear:
+            case .weekOfYear:
                 weekOfYear = value
-            case NSCalendar.Unit.yearForWeekOfYear:
+            case .yearForWeekOfYear:
                 yearForWeekOfYear = value
-            case NSCalendar.Unit.calendar:
+            case .calendar:
                 print(".Calendar cannot be set via \(#function)")
-            case NSCalendar.Unit.timeZone:
+            case .timeZone:
                 print(".TimeZone cannot be set via \(#function)")
             default:
                 break
@@ -1625,33 +1629,33 @@ open class NSDateComponents : NSObject, NSCopying, NSSecureCoding {
     */
     open func value(forComponent unit: NSCalendar.Unit) -> Int {
         switch unit {
-            case NSCalendar.Unit.era:
+            case .era:
                 return era
-            case NSCalendar.Unit.year:
+            case .year:
                 return year
-            case NSCalendar.Unit.month:
+            case .month:
                 return month
-            case NSCalendar.Unit.day:
+            case .day:
                 return day
-            case NSCalendar.Unit.hour:
+            case .hour:
                 return hour
-            case NSCalendar.Unit.minute:
+            case .minute:
                 return minute
-            case NSCalendar.Unit.second:
+            case .second:
                 return second
-            case NSCalendar.Unit.nanosecond:
+            case .nanosecond:
                 return nanosecond
-            case NSCalendar.Unit.weekday:
+            case .weekday:
                 return weekday
-            case NSCalendar.Unit.weekdayOrdinal:
+            case .weekdayOrdinal:
                 return weekdayOrdinal
-            case NSCalendar.Unit.quarter:
+            case .quarter:
                 return quarter
-            case NSCalendar.Unit.weekOfMonth:
+            case .weekOfMonth:
                 return weekOfMonth
-            case NSCalendar.Unit.weekOfYear:
+            case .weekOfYear:
                 return weekOfYear
-            case NSCalendar.Unit.yearForWeekOfYear:
+            case .yearForWeekOfYear:
                 return yearForWeekOfYear
             default:
                 break

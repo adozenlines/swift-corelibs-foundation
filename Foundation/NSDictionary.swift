@@ -9,7 +9,7 @@
 
 
 import CoreFoundation
-
+import Dispatch
 
 open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCoding {
     private let _cfinfo = _CFInfo(typeID: CFDictionaryGetTypeID())
@@ -32,12 +32,33 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
         return nil
     }
     
+    open func value(forKey key: String) -> Any? {
+        NSUnsupported()
+    }
+    
     open func keyEnumerator() -> NSEnumerator {
         guard type(of: self) === NSDictionary.self || type(of: self) === NSMutableDictionary.self else {
             NSRequiresConcreteImplementation()
         }
         
         return NSGeneratorEnumerator(_storage.keys.map { _SwiftValue.fetch(nonOptional: $0) }.makeIterator())
+    }
+    
+    @available(*, deprecated)
+    public convenience init?(contentsOfFile path: String) {
+        self.init(contentsOf: URL(fileURLWithPath: path))
+    }
+    
+    @available(*, deprecated)
+    public convenience init?(contentsOf url: URL) {
+        do {
+            guard let plistDoc = try? Data(contentsOf: url) else { return nil }
+            let plistDict = try PropertyListSerialization.propertyList(from: plistDoc, options: [], format: nil) as? Dictionary<AnyHashable,Any>
+            guard let plistDictionary = plistDict else { return nil }
+            self.init(dictionary: plistDictionary)
+        } catch {
+            return nil
+        }
     }
     
     public override convenience init() {
@@ -124,17 +145,17 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
     
     public convenience init(objects: [Any], forKeys keys: [NSObject]) {
         let keyBuffer = UnsafeMutablePointer<NSObject>.allocate(capacity: keys.count)
-        keyBuffer.initialize(from: keys)
+        keyBuffer.initialize(from: keys, count: keys.count)
 
         let valueBuffer = UnsafeMutablePointer<AnyObject>.allocate(capacity: objects.count)
-        valueBuffer.initialize(from: objects.map { _SwiftValue.store($0) })
+        valueBuffer.initialize(from: objects.map { _SwiftValue.store($0) }, count: objects.count)
 
         self.init(objects: valueBuffer, forKeys:keyBuffer, count: keys.count)
         
         keyBuffer.deinitialize(count: keys.count)
         valueBuffer.deinitialize(count: objects.count)
-        keyBuffer.deallocate(capacity: keys.count)
-        valueBuffer.deallocate(capacity: objects.count)
+        keyBuffer.deallocate()
+        valueBuffer.deallocate()
     }
     
     public convenience init(dictionary otherDictionary: [AnyHashable : Any]) {
@@ -374,13 +395,12 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
                 if otherValue != value {
                     return false
                 }
-            } else if let otherBridgeable = otherDictionary[key as! AnyHashable] as? _ObjectBridgeable,
-                      let bridgeable = object(forKey: key)! as? _ObjectBridgeable {
-                if !(otherBridgeable._bridgeToAnyObject() as! NSObject).isEqual(bridgeable._bridgeToAnyObject()) {
+            } else {
+              let otherBridgeable = otherDictionary[key as! AnyHashable]
+              let bridgeable = object(forKey: key)!
+                if !((otherBridgeable as AnyObject) as! NSObject).isEqual(bridgeable as AnyObject) {
                     return false
                 }
-            } else {
-                return false
             }
         }
         
@@ -442,7 +462,7 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
     // the atomically flag is ignored if url of a type that cannot be written atomically.
     open func write(to url: URL, atomically: Bool) -> Bool {
         do {
-            let pListData = try PropertyListSerialization.data(fromPropertyList: self, format: PropertyListSerialization.PropertyListFormat.xml, options: 0)
+            let pListData = try PropertyListSerialization.data(fromPropertyList: self, format: .xml, options: 0)
             try pListData.write(to: url, options: atomically ? .atomic : [])
             return true
         } catch {
@@ -454,19 +474,37 @@ open class NSDictionary : NSObject, NSCopying, NSMutableCopying, NSSecureCoding,
         enumerateKeysAndObjects(options: [], using: block)
     }
 
-    open func enumerateKeysAndObjects(options opts: NSEnumerationOptions = [], using block: (Any, Any, UnsafeMutablePointer<ObjCBool>) -> Swift.Void) {
+    open func enumerateKeysAndObjects(options opts: NSEnumerationOptions = [], using block: (Any, Any, UnsafeMutablePointer<ObjCBool>) -> Void) {
         let count = self.count
         var keys = [Any]()
         var objects = [Any]()
+        var sharedStop = ObjCBool(false)
+        let lock = NSLock()
+        
         getObjects(&objects, andKeys: &keys, count: count)
-        var stop = ObjCBool(false)
-        for idx in 0..<count {
-            withUnsafeMutablePointer(to: &stop, { stop in
-                block(keys[idx], objects[idx], stop)
-            })
+        withoutActuallyEscaping(block) { (closure: @escaping (Any, Any, UnsafeMutablePointer<ObjCBool>) -> Void) -> () in
+            let iteration: (Int) -> Void = { (idx) in
+                lock.lock()
+                var stop = sharedStop
+                lock.unlock()
+                if stop.boolValue { return }
+                
+                closure(keys[idx], objects[idx], &stop)
+                
+                if stop.boolValue {
+                    lock.lock()
+                    sharedStop = stop
+                    lock.unlock()
+                    return
+                }
+            }
 
-            if stop {
-                break
+            if opts.contains(.concurrent) {
+                DispatchQueue.concurrentPerform(iterations: count, execute: iteration)
+            } else {
+                for idx in 0..<count {
+                    iteration(idx)
+                }
             }
         }
     }
@@ -547,7 +585,7 @@ open class NSMutableDictionary : NSDictionary {
         guard type(of: self) === NSDictionary.self || type(of: self) === NSMutableDictionary.self else {
             NSRequiresConcreteImplementation()
         }
-        _storage[(aKey as! NSObject)] = _SwiftValue.store(anObject)
+        _storage[_SwiftValue.store(aKey)] = _SwiftValue.store(anObject)
     }
     
     public convenience required init() {
@@ -565,20 +603,6 @@ open class NSMutableDictionary : NSDictionary {
         super.init(objects: objects, forKeys: keys, count: cnt)
     }
     
-    public convenience init?(contentsOfFile path: String) {
-        self.init(contentsOfURL: URL(fileURLWithPath: path))
-    }
-    
-    public convenience init?(contentsOfURL url: URL) {
-        do {
-            guard let plistDoc = try? Data(contentsOf: url) else { return nil }
-            let plistDict = try PropertyListSerialization.propertyList(from: plistDoc, options: [], format: nil) as? Dictionary<AnyHashable,Any>
-            guard let plistDictionary = plistDict else { return nil }
-            self.init(dictionary: plistDictionary)
-        } catch {
-            return nil
-        }
-    }
 }
 
 extension NSMutableDictionary {

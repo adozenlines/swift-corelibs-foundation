@@ -7,14 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
 class TestNSCache : XCTestCase {
     
     static var allTests: [(String, (TestNSCache) -> () throws -> Void)] {
@@ -23,6 +15,9 @@ class TestNSCache : XCTestCase {
             ("test_setWithMutableKeys", test_setWithMutableKeys),
             ("test_costLimit", test_costLimit),
             ("test_countLimit", test_countLimit),
+            ("test_hashableKey", test_hashableKey),
+            ("test_nonHashableKey", test_nonHashableKey),
+            ("test_objectCorrectlyReleased", test_objectCorrectlyReleased)
         ]
     }
     
@@ -69,9 +64,21 @@ class TestNSCache : XCTestCase {
         XCTAssertEqual(cache.object(forKey: key2), value, "should be equal to \(value) when using second key")
         
         key1.append("1")
-        
-        XCTAssertEqual(cache.object(forKey: key1), value, "should be equal to \(value) when using first key")
+
+        // Mutating the key probably changes the hash value, which often makes
+        // the value inaccessible by sorting the key into a different bucket.
+        // On the other hand, the bucket may remain the same by coincidence.
+        // Therefore, `cache.object(forKey: key1)` may or may not be nil at 
+        // this point -- no useful check can be made.
+        // The object can definitely not be reached via the original key,
+        // though.
         XCTAssertNil(cache.object(forKey: key2), "should be nil")
+
+		// Restoring key1 to the original string will make the value 
+		// accessible again.
+        key1.setString("key")
+        XCTAssertEqual(cache.object(forKey: key1), value, "should be equal to \(value) when using first key")
+        XCTAssertEqual(cache.object(forKey: key2), value, "should be equal to \(value) when using second key")        
     }
     
     func test_costLimit() {
@@ -97,13 +104,106 @@ class TestNSCache : XCTestCase {
         let key3 = NSString(string: "key3")
         let value = NSString(string: "value")
         
-        cache.setObject(value, forKey: key1)
-        cache.setObject(value, forKey: key2)
-        cache.setObject(value, forKey: key3)
+        cache.setObject(value, forKey: key1, cost: 1)
+        cache.setObject(value, forKey: key2, cost: 2)
+        cache.setObject(value, forKey: key3, cost: 3)
         
         XCTAssertEqual(cache.object(forKey: key2), value, "should be equal to \(value)")
         XCTAssertEqual(cache.object(forKey: key3), value, "should be equal to \(value)")
         XCTAssertNil(cache.object(forKey: key1), "should be nil")
         
+    }
+
+
+    class TestHashableCacheKey: Hashable {
+        let string: String
+        var hashValue: Int { return string.hashValue }
+
+        init(string: String) {
+            self.string = string
+        }
+
+        static func ==(lhs: TestHashableCacheKey,
+            rhs:TestHashableCacheKey) -> Bool {
+            return lhs.string == rhs.string
+        }
+    }
+
+    // Test when NSCacheKey.value is AnyHashable
+    func test_hashableKey() {
+        let cache = NSCache<TestHashableCacheKey, NSString>()
+        cache.countLimit = 2
+
+        let key1 = TestHashableCacheKey(string: "key1")
+        let key2 = TestHashableCacheKey(string: "key2")
+        let key3 = TestHashableCacheKey(string: "key3")
+        let value = NSString(string: "value")
+
+        cache.setObject(value, forKey: key1, cost: 1)
+        cache.setObject(value, forKey: key2, cost: 2)
+        cache.setObject(value, forKey: key3, cost: 3)
+
+        XCTAssertEqual(cache.object(forKey: key2), value, "should be equal to \(value)")
+        XCTAssertEqual(cache.object(forKey: key3), value, "should be equal to \(value)")
+        XCTAssertNil(cache.object(forKey: key1), "should be nil")
+    }
+
+
+    class TestCacheKey {
+        let string: String
+
+        init(string: String) {
+            self.string = string
+        }
+    }
+
+    // Test when NSCacheKey.value is neither NSObject or AnyHashable
+    func test_nonHashableKey() {
+        let cache = NSCache<TestCacheKey, NSString>()
+        cache.countLimit = 2
+
+        let key1 = TestCacheKey(string: "key1")
+        let key2 = TestCacheKey(string: "key2")
+        let key3 = TestCacheKey(string: "key3")
+        let value = NSString(string: "value")
+
+        cache.setObject(value, forKey: key1, cost: 1)
+        cache.setObject(value, forKey: key2, cost: 2)
+        cache.setObject(value, forKey: key3, cost: 3)
+
+        XCTAssertEqual(cache.object(forKey: key2), value, "should be equal to \(value)")
+        XCTAssertEqual(cache.object(forKey: key3), value, "should be equal to \(value)")
+        XCTAssertNil(cache.object(forKey: key1), "should be nil")
+    }
+    
+    func test_objectCorrectlyReleased() {
+        let cache = NSCache<NSString, AnyObject>()
+        cache.totalCostLimit = 10
+        
+        var object1 = NSObject()
+        weak var weakObject1: NSObject? = object1
+        
+        var object2 = NSObject()
+        weak var weakObject2: NSObject? = object2
+        
+        var object3 = NSObject()
+        weak var weakObject3: NSObject? = object3
+        
+        let object4 = NSObject()
+        let object5 = NSObject()
+        
+        cache.setObject(object1, forKey: "key1", cost: 1)
+        cache.setObject(object2, forKey: "key2", cost: 2)
+        cache.setObject(object3, forKey: "key3", cost: 3)
+        cache.setObject(object4, forKey: "key4", cost: 4)
+        cache.setObject(object5, forKey: "key5", cost: 5)
+        
+        object1 = NSObject()
+        object2 = NSObject()
+        object3 = NSObject()
+        
+        XCTAssertNil(weakObject1, "removed cached object not released")
+        XCTAssertNil(weakObject2, "removed cached object not released")
+        XCTAssertNil(weakObject3, "removed cached object not released")
     }
 }

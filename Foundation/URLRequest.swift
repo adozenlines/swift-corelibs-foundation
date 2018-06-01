@@ -59,6 +59,11 @@ public struct URLRequest : ReferenceConvertible, Equatable, Hashable {
             _applyMutation { $0.cachePolicy = newValue }
         }
     }
+
+    //URLRequest.timeoutInterval should be given precedence over the URLSessionConfiguration.timeoutIntervalForRequest regardless of the value set,
+    // if it has been set at least once. Even though the default value is 60 ,if the user sets URLRequest.timeoutInterval
+    // to explicitly 60 then the precedence should be given to URLRequest.timeoutInterval.
+    internal var isTimeoutIntervalSet = false
     
     /// Returns the timeout interval of the receiver.
     /// - discussion: The timeout interval specifies the limit on the idle
@@ -77,6 +82,7 @@ public struct URLRequest : ReferenceConvertible, Equatable, Hashable {
         }
         set {
             _applyMutation { $0.timeoutInterval = newValue }
+            isTimeoutIntervalSet = true
         }
     }
     
@@ -257,11 +263,11 @@ extension URLRequest : CustomStringConvertible, CustomDebugStringConvertible, Cu
         c.append((label: "httpBodyStream", value: httpBodyStream as Any))
         c.append((label: "httpShouldHandleCookies", value: httpShouldHandleCookies))
         c.append((label: "httpShouldUsePipelining", value: httpShouldUsePipelining))
-        return Mirror(self, children: c, displayStyle: Mirror.DisplayStyle.struct)
+        return Mirror(self, children: c, displayStyle: .struct)
     }
 }
 
-extension URLRequest : _ObjectTypeBridgeable {
+extension URLRequest : _ObjectiveCBridgeable {
     public static func _getObjectiveCType() -> Any.Type {
         return NSURLRequest.self
     }

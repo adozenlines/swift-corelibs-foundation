@@ -668,7 +668,9 @@ public struct URL : ReferenceConvertible, Equatable {
     /// File system representation is a null-terminated C string with canonical UTF-8 encoding.
     /// - note: The pointer is not valid outside the context of the block.
     public func withUnsafeFileSystemRepresentation<ResultType>(_ block: (UnsafePointer<Int8>?) throws -> ResultType) rethrows -> ResultType {
-        return try block(_url.fileSystemRepresentation)
+        let fsRep = _url.fileSystemRepresentation
+        defer { fsRep.deallocate() }
+        return try block(fsRep)
     }
     
     // MARK: -
@@ -817,7 +819,7 @@ public struct URL : ReferenceConvertible, Equatable {
         self = appendingPathExtension(pathExtension)
     }
 
-    /// Returns a URL constructed by removing the last path component of self.
+    /// Removes the last path component from self.
     ///
     /// This function may either remove a path component or append `/..`.
     ///
@@ -827,7 +829,7 @@ public struct URL : ReferenceConvertible, Equatable {
     }
     
 
-    /// Returns a URL constructed by removing any path extension.
+    /// Removes any path extension from self.
     ///
     /// If the URL has an empty path (e.g., `http://www.example.com`), then this function will do nothing.
     public mutating func deletePathExtension() {
@@ -955,7 +957,7 @@ public struct URL : ReferenceConvertible, Equatable {
     }
 }
 
-extension URL : _ObjectTypeBridgeable {
+extension URL : _ObjectiveCBridgeable {
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> NSURL {
         return _url
@@ -990,10 +992,40 @@ extension URL : CustomStringConvertible, CustomDebugStringConvertible {
 }
 
 extension URL : CustomPlaygroundQuickLookable {
+    @available(*, deprecated, message: "URL.customPlaygroundQuickLook will be removed in a future Swift version")
     public var customPlaygroundQuickLook: PlaygroundQuickLook {
         return .url(absoluteString)
     }
 }
+
+extension URL : Codable {
+    private enum CodingKeys : Int, CodingKey {
+        case base
+        case relative
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let relative = try container.decode(String.self, forKey: .relative)
+        let base = try container.decodeIfPresent(URL.self, forKey: .base)
+
+        guard let url = URL(string: relative, relativeTo: base) else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath,
+                                                                    debugDescription: "Invalid URL string."))
+        }
+
+        self = url
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.relativeString, forKey: .relative)
+        if let base = self.baseURL {
+            try container.encode(base, forKey: .base)
+        }
+    }
+}
+
 
 //===----------------------------------------------------------------------===//
 // File references, for playgrounds.

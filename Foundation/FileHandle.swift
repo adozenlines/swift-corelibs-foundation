@@ -9,7 +9,7 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 import Darwin
 #elseif os(Linux) || CYGWIN
 import Glibc
@@ -76,7 +76,7 @@ open class FileHandle : NSObject, NSSecureCoding {
                 fatalError("Unable to fetch current file offset")
             }
             if off_t(statbuf.st_size) > offset {
-                var remaining = size_t(statbuf.st_size - offset)
+                var remaining = size_t(off_t(statbuf.st_size) - offset)
                 remaining = min(remaining, size_t(length))
                 
                 dynamicBuffer = malloc(remaining)
@@ -103,13 +103,16 @@ open class FileHandle : NSObject, NSSecureCoding {
             dynamicBuffer = _CFReallocf(dynamicBuffer!, total)
         }
         
-        if (0 == total) {
+        if total == 0 {
             free(dynamicBuffer)
         }
-        
-        if total > 0 {
+        else if total > 0 {
             let bytePtr = dynamicBuffer!.bindMemory(to: UInt8.self, capacity: total)
-            return Data(bytesNoCopy: bytePtr, count: total, deallocator: .none)
+            return Data(bytesNoCopy: bytePtr, count: total, deallocator: .free)
+        }
+        else {
+            assertionFailure("The total number of read bytes must not be negative")
+            free(dynamicBuffer)
         }
         
         return Data()
@@ -139,13 +142,12 @@ open class FileHandle : NSObject, NSSecureCoding {
     open func seek(toFileOffset offset: UInt64) {
         lseek(_fd, off_t(offset), SEEK_SET)
     }
-    
+
     open func truncateFile(atOffset offset: UInt64) {
-        if lseek(_fd, off_t(offset), SEEK_SET) == 0 {
-            ftruncate(_fd, off_t(offset))
-        }
+        if lseek(_fd, off_t(offset), SEEK_SET) < 0 { fatalError("lseek() failed.") }
+        if ftruncate(_fd, off_t(offset)) < 0 { fatalError("ftruncate() failed.") }
     }
-    
+
     open func synchronizeFile() {
         fsync(_fd)
     }

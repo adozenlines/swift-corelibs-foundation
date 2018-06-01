@@ -25,7 +25,7 @@
 /// store and retrieve data, category methods can use the
 /// `propertyForKey(_:,inRequest:)` and
 /// `setProperty(_:,forKey:,inRequest:)` class methods on
-/// `NSURLProtocol`. See the `NSHTTPURLRequest` on `NSURLRequest` and
+/// `URLProtocol`. See the `NSHTTPURLRequest` on `NSURLRequest` and
 /// `NSMutableHTTPURLRequest` on `NSMutableURLRequest` for examples of
 /// such extensions.
 ///
@@ -110,7 +110,7 @@ extension NSURLRequest {
 /// categories that are available. The `NSHTTPURLRequest` category on
 /// `NSURLRequest` is an example.
 ///
-/// Objects of this class are used with the `NSURLSession` API to perform the
+/// Objects of this class are used with the `URLSession` API to perform the
 /// load of a URL.
 open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying {
     
@@ -139,10 +139,17 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     }
     
     private func setValues(from source: NSURLRequest) {
-        self.allHTTPHeaderFields = source.allHTTPHeaderFields
         self.url = source.url
         self.mainDocumentURL = source.mainDocumentURL
+        self.cachePolicy = source.cachePolicy
+        self.timeoutInterval = source.timeoutInterval
         self.httpMethod = source.httpMethod
+        self.allHTTPHeaderFields = source.allHTTPHeaderFields
+        self._body = source._body
+        self.networkServiceType = source.networkServiceType
+        self.allowsCellularAccess = source.allowsCellularAccess
+        self.httpShouldHandleCookies = source.httpShouldHandleCookies
+        self.httpShouldUsePipelining = source.httpShouldUsePipelining
     }
     
     open override func mutableCopy() -> Any {
@@ -159,6 +166,8 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
         guard aDecoder.allowsKeyedCoding else {
             preconditionFailure("Unkeyed coding is unsupported.")
         }
+
+        super.init()
         
         if let encodedURL = aDecoder.decodeObject(forKey: "NS.url") as? NSURL {
             self.url = encodedURL._swiftObject
@@ -267,8 +276,28 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     
     open internal(set) var timeoutInterval: TimeInterval = 60.0
 
+    internal var _httpMethod: String? = "GET"
+
     /// Returns the HTTP request method of the receiver.
-    open fileprivate(set) var httpMethod: String? = "GET"
+    open fileprivate(set) var httpMethod: String? {
+        get { return _httpMethod }
+        set { _httpMethod = NSURLRequest._normalized(newValue) }
+    }
+
+    private class func _normalized(_ raw: String?) -> String {
+        guard let raw = raw else {
+            return "GET"
+        }
+
+        let nsMethod = NSString(raw)
+
+        for method in ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT"] {
+            if nsMethod.caseInsensitiveCompare(method) == .orderedSame {
+                return method
+            }
+        }
+        return raw
+    }
     
     /// A dictionary containing all the HTTP header fields
     /// of the receiver.
@@ -298,7 +327,7 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
             switch body {
             case .data(let data):
                 return data
-            case .stream(_):
+            case .stream:
                 return nil
             }
         }
@@ -308,7 +337,7 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     open var httpBodyStream: InputStream? {
         if let body = _body {
             switch body {
-            case .data(_):
+            case .data:
                 return nil
             case .stream(let stream):
                 return stream
@@ -324,6 +353,11 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     open internal(set) var httpShouldHandleCookies: Bool = true
     
     open internal(set) var httpShouldUsePipelining: Bool = true
+
+    open override var description: String {
+        let url = self.url?.description ?? "(null)"
+        return super.description + " { URL: \(url) }"
+    }
 }
 
 /// An `NSMutableURLRequest` object represents a mutable URL load
@@ -334,7 +368,7 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
 /// object for a series of URL loads instead of creating an immutable
 /// `NSURLRequest` for each load. This programming model is supported by
 /// the following contract stipulation between `NSMutableURLRequest` and the
-/// `NSURLSession` API: `NSURLSession` makes a deep copy of each
+/// `URLSession` API: `URLSession` makes a deep copy of each
 /// `NSMutableURLRequest` object passed to it.
 ///
 /// `NSMutableURLRequest` is designed to be extended to support
@@ -455,7 +489,7 @@ open class NSMutableURLRequest : NSURLRequest {
                 switch body {
                 case .data(let data):
                     return data
-                case .stream(_):
+                case .stream:
                     return nil
                 }
             }
@@ -474,7 +508,7 @@ open class NSMutableURLRequest : NSURLRequest {
         get {
             if let body = _body {
                 switch body {
-                case .data(_):
+                case .data:
                     return nil
                 case .stream(let stream):
                     return stream

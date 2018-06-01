@@ -10,7 +10,7 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 internal let kCFCompareLessThan = CFComparisonResult.compareLessThan
 internal let kCFCompareEqualTo = CFComparisonResult.compareEqualTo
 internal let kCFCompareGreaterThan = CFComparisonResult.compareGreaterThan
@@ -202,6 +202,13 @@ internal func NSUnimplemented(_ fn: String = #function, file: StaticString = #fi
     fatalError("\(fn) is not yet implemented", file: file, line: line)
 }
 
+internal func NSUnsupported(_ fn: String = #function, file: StaticString = #file, line: UInt = #line) -> Never {
+    #if os(Android)
+    NSLog("\(fn) is not supported on this platform. \(file):\(line)")
+    #endif
+    fatalError("\(fn) is not supported on this platform", file: file, line: line)
+}
+
 internal func NSInvalidArgument(_ message: String, method: String = #function, file: StaticString = #file, line: UInt = #line) -> Never {
     fatalError("\(method): \(message)", file: file, line: line)
 }
@@ -221,7 +228,7 @@ internal struct _CFInfo {
     }
 }
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 private let _SwiftFoundationModuleName = "SwiftFoundation"
 #else
 private let _SwiftFoundationModuleName = "Foundation"

@@ -9,13 +9,8 @@
 
 #if DEPLOYMENT_ENABLE_LIBDISPATCH
 import Dispatch
-#if os(Linux) || os(Android)
+#endif
 import CoreFoundation
-private func pthread_main_np() -> Int32 {
-    return _CFIsMainThread() ? 1 : 0
-}
-#endif
-#endif
 
 open class Operation : NSObject {
     let lock = NSLock()
@@ -48,7 +43,15 @@ open class Operation : NSObject {
     }
     
     open func start() {
-        main()
+        if !isCancelled {
+            lock.lock()
+            _executing = true
+            lock.unlock()
+            main()
+            lock.lock()
+            _executing = false
+            lock.unlock()
+        }
         finish()
     }
     
@@ -78,14 +81,23 @@ open class Operation : NSObject {
     }
     
     open func cancel() {
+        // Note that calling cancel() is advisory. It is up to the main() function to
+        // call isCancelled at appropriate points in its execution flow and to do the
+        // actual canceling work. Eventually main() will invoke finish() and this is
+        // where we then leave the groups and unblock other operations that might
+        // depend on us.
         lock.lock()
         _cancelled = true
-        _leaveGroups()
         lock.unlock()
     }
     
     open var isExecuting: Bool {
-        return _executing
+        let wasExecuting: Bool
+        lock.lock()
+        wasExecuting = _executing
+        lock.unlock()
+
+        return wasExecuting
     }
     
     open var isFinished: Bool {
@@ -306,7 +318,13 @@ open class OperationQueue: NSObject {
     let lock = NSLock()
 #if DEPLOYMENT_ENABLE_LIBDISPATCH
     var __concurrencyGate: DispatchSemaphore?
-    var __underlyingQueue: DispatchQueue?
+    var __underlyingQueue: DispatchQueue? {
+        didSet {
+            let key = OperationQueue.OperationQueueKey
+            oldValue?.setSpecific(key: key, value: nil)
+            __underlyingQueue?.setSpecific(key: key, value: Unmanaged.passUnretained(self))
+        }
+    }
     let queueGroup = DispatchGroup()
 #endif
     
@@ -406,7 +424,7 @@ open class OperationQueue: NSObject {
          the enqueued operation in this callout. So once the dispatch_block is created
          the operation must NOT be touched; since it has nothing to do with the actual
          execution. The only differential is that the block enqueued to dispatch_async
-         is balanced with the number of Operations enqueued to the NSOperationQueue.
+         is balanced with the number of Operations enqueued to the OperationQueue.
          */
         lock.lock()
         ops.forEach { (operation: Operation) -> Void in
@@ -552,31 +570,29 @@ open class OperationQueue: NSObject {
 
     open class var current: OperationQueue? {
 #if DEPLOYMENT_ENABLE_LIBDISPATCH
-        let specific = DispatchQueue.getSpecific(key: OperationQueue.OperationQueueKey)
-        if specific == nil {
-            if pthread_main_np() == 1 {
+        guard let specific = DispatchQueue.getSpecific(key: OperationQueue.OperationQueueKey) else {
+            if _CFIsMainThread() {
                 return OperationQueue.main
             } else {
                 return nil
             }
-        } else {
-            return specific!.takeUnretainedValue()
         }
+        
+        return specific.takeUnretainedValue()
 #else
         return nil
 #endif
     }
     
+#if DEPLOYMENT_ENABLE_LIBDISPATCH
+    private static let _main = OperationQueue(_queue: .main, maxConcurrentOperations: 1)
+#endif
+    
     open class var main: OperationQueue {
 #if DEPLOYMENT_ENABLE_LIBDISPATCH
-        let specific = DispatchQueue.main.getSpecific(key: OperationQueue.OperationQueueKey)
-        if specific == nil {
-            return OperationQueue(_queue: DispatchQueue.main, maxConcurrentOperations: 1)
-        } else {
-            return specific!.takeUnretainedValue()
-        }
+        return _main
 #else
-        fatalError("NSOperationQueue requires libdispatch")
+        fatalError("OperationQueue requires libdispatch")
 #endif
     }
 }

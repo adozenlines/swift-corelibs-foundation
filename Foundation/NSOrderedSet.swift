@@ -287,7 +287,7 @@ extension NSOrderedSet {
     }
 
     public convenience init(orderedSet set: NSOrderedSet, copyItems flag: Bool) {
-        self.init(orderedSet: set, range: NSMakeRange(0, set.count), copyItems: flag)
+        self.init(orderedSet: set, range: NSRange(location: 0, length: set.count), copyItems: flag)
     }
 
     public convenience init(orderedSet set: NSOrderedSet, range: NSRange, copyItems flag: Bool) {
@@ -302,17 +302,17 @@ extension NSOrderedSet {
         }
         self.init(objects: buffer, count: array.count)
         buffer.deinitialize(count: array.count)
-        buffer.deallocate(capacity: array.count)
+        buffer.deallocate()
     }
 
     public convenience init(array set: [Any], copyItems flag: Bool) {
-        self.init(array: set, range: NSMakeRange(0, set.count), copyItems: flag)
+        self.init(array: set, range: NSRange(location: 0, length: set.count), copyItems: flag)
     }
 
     public convenience init(array set: [Any], range: NSRange, copyItems flag: Bool) {
         var objects = set
 
-        if let range = range.toCountableRange(), range.count != set.count || flag {
+        if let range = Range(range), range.count != set.count || flag {
             objects = [Any]()
             for index in range.indices {
                 let object = set[index]
@@ -461,7 +461,7 @@ extension NSMutableOrderedSet {
     }
     
     open func replaceObjects(in range: NSRange, with objects: UnsafePointer<AnyObject>!, count: Int) {
-        if let range = range.toCountableRange() {
+        if let range = Range(range) {
             let buffer = UnsafeBufferPointer(start: objects, count: count)
             for (indexLocation, index) in range.indices.lazy.reversed().enumerated() {
                 let object = buffer[indexLocation]
@@ -478,7 +478,7 @@ extension NSMutableOrderedSet {
     }
     
     open func removeObjects(in range: NSRange) {
-        if let range = range.toCountableRange() {
+        if let range = Range(range) {
             for index in range.indices.lazy.reversed() {
                 removeObject(at: index)
             }
@@ -540,11 +540,11 @@ extension NSMutableOrderedSet {
     }
     
     open func sort(comparator cmptr: (Any, Any) -> ComparisonResult) {
-        sortRange(NSMakeRange(0, count), options: [], usingComparator: cmptr)
+        sortRange(NSRange(location: 0, length: count), options: [], usingComparator: cmptr)
     }
 
     open func sort(options opts: NSSortOptions = [], usingComparator cmptr: (Any, Any) -> ComparisonResult) {
-        sortRange(NSMakeRange(0, count), options: opts, usingComparator: cmptr)
+        sortRange(NSRange(location: 0, length: count), options: opts, usingComparator: cmptr)
     }
 
     open func sortRange(_ range: NSRange, options opts: NSSortOptions = [], usingComparator cmptr: (Any, Any) -> ComparisonResult) {
@@ -553,7 +553,7 @@ extension NSMutableOrderedSet {
             NSUnimplemented()
         }
 
-        let swiftRange = range.toRange()!
+        let swiftRange = Range(range)!
         _orderedStorage[swiftRange].sort { lhs, rhs in
             return cmptr(_SwiftValue.fetch(nonOptional: lhs), _SwiftValue.fetch(nonOptional: rhs)) == .orderedAscending
         }
